@@ -4,7 +4,7 @@
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![BrainDrive](https://img.shields.io/badge/BrainDrive-Plugin-purple.svg)](https://github.com/BrainDriveAI/BrainDrive)
 
-A dedicated [BrainDrive](https://github.com/BrainDriveAI/BrainDrive-Core) plugin that delivers Ollama-specific experiences including server lifecycle management, model installation, and a prompt chat interface.
+The default [BrainDrive](https://github.com/BrainDriveAI/BrainDrive-Core) plugin that delivers Ollama-specific experiences including server lifecycle management, model installation, and a prompt chat interface.
 
 ## Features
 - Ollama server registration, health checks, and connection testing
