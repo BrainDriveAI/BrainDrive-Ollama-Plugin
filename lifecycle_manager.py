@@ -105,7 +105,7 @@ class BrainDriveOllamaLifecycleManager(BaseLifecycleManager):
             "version": "1.0.0",
             "type": "frontend",
             "icon": "SmartToy",
-            "category": "AI",
+            "category": "LLM Servers",
             "official": True,
             "author": "BrainDrive Team",
             "compatibility": "1.0.0",
@@ -159,44 +159,7 @@ class BrainDriveOllamaLifecycleManager(BaseLifecycleManager):
                     "defaultWidth": 8,
                     "defaultHeight": 5
                 },
-                "tags": ["Ollama", "LLM", "Servers"]
-            },
-            {
-                "name": "AIPromptChat",
-                "display_name": "Ollama Prompt Chat",
-                "description": "Chat with Ollama models, stream responses, and react to model selection events.",
-                "icon": "Chat",
-                "category": "AI",
-                "priority": 1,
-                "props": {},
-                "config_fields": {},
-                "messages": {"sends": [], "receives": []},
-                "required_services": {
-                    "api": {
-                        "methods": ["post", "postStreaming"],
-                        "version": "1.0.0"
-                    },
-                    "theme": {
-                        "methods": ["getCurrentTheme", "addThemeChangeListener", "removeThemeChangeListener"],
-                        "version": "1.0.0"
-                    },
-                    "settings": {
-                        "methods": ["getSetting", "setSetting", "registerSettingDefinition"],
-                        "version": "1.0.0"
-                    },
-                    "event": {
-                        "methods": ["subscribeToMessages", "unsubscribeFromMessages", "sendMessage"],
-                        "version": "1.0.0"
-                    }
-                },
-                "dependencies": [],
-                "layout": {
-                    "minWidth": 6,
-                    "minHeight": 4,
-                    "defaultWidth": 12,
-                    "defaultHeight": 6
-                },
-                "tags": ["Ollama", "Chat", "AI"]
+                "tags": ["settings","Ollama", "LLM", "Servers"]
             }
         ]
         
