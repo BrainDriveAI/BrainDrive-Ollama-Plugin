@@ -152,7 +152,7 @@ class BrainDriveOllamaLifecycleManager(BaseLifecycleManager):
                         "version": "1.0.0"
                     }
                 },
-                "dependencies": [],s
+                "dependencies": [],
                 "layout": {
                     "minWidth": 6,
                     "minHeight": 4,
