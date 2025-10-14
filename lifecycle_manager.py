@@ -133,7 +133,7 @@ class BrainDriveOllamaLifecycleManager(BaseLifecycleManager):
                 "display_name": "Ollama Servers",
                 "description": "Manage Ollama servers, models, and lifecycle operations.",
                 "icon": "Storage",
-                "category": "AI",
+                "category": "LLM Servers",
                 "priority": 1,
                 "props": {},
                 "config_fields": {},
@@ -152,14 +152,14 @@ class BrainDriveOllamaLifecycleManager(BaseLifecycleManager):
                         "version": "1.0.0"
                     }
                 },
-                "dependencies": [],
+                "dependencies": [],s
                 "layout": {
                     "minWidth": 6,
                     "minHeight": 4,
                     "defaultWidth": 8,
                     "defaultHeight": 5
                 },
-                "tags": ["settings","Ollama", "LLM", "Servers"]
+                "tags": ["Settings","Ollama", "LLM", "Servers"]
             }
         ]
         
