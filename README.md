@@ -4,7 +4,7 @@
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![BrainDrive](https://img.shields.io/badge/BrainDrive-Plugin-purple.svg)](https://github.com/BrainDriveAI/BrainDrive)
 
-A dedicated BrainDrive plugin that delivers Ollama-specific experiences including server lifecycle management, model installation, and a prompt chat interface.
+A dedicated [BrainDrive](https://github.com/BrainDriveAI/BrainDrive-Core) plugin that delivers Ollama-specific experiences including server lifecycle management, model installation, and a prompt chat interface.
 
 ## Features
 - Ollama server registration, health checks, and connection testing
@@ -31,4 +31,15 @@ Build artifacts are emitted to `dist/remoteEntry.js` for consumption by the Brai
 See `lifecycle_manager.py` for installation hooks, module metadata, and settings definitions registered with BrainDrive.
 
 ## License
-MIT © BrainDrive.ai
+[MIT License](LICENSE) **Your AI. Your Rules.**
+
+## Resources
+
+[Owner's Manual](https://docs.braindrive.ai/core/how-to/use-braindrive) - Full overview of how to install, setup, and use your BrainDrive.  
+[Community](https://community.braindrive.ai/) - For support, and to connect with other BrainDrive Owners.  
+[Roadmap](https://docs.braindrive.ai/core/ROADMAP) - BrainDrive's 5 Phase vision for building a superior, user-owned alternative to Big Tech AI systems.   
+[Contributing](https://docs.braindrive.ai/core/CONTRIBUTING) - How to get involved. 
+
+Thank you for joining us on the journey away from Big Tech extraction, and towards individual freedom and empowerment.
+
+
