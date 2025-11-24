@@ -50,12 +50,14 @@ interface ModelDetails {
 // New interfaces for model installation and operations
 interface ModelInstallation {
   id: string;
+  jobId?: string;
   modelName: string;
   status: 'pending' | 'downloading' | 'completed' | 'error';
   progress: number;
   error?: string;
   customMessage?: string;
   startTime: Date;
+  lastUpdated?: string;
 }
 
 interface ModelOperation {
@@ -66,6 +68,23 @@ interface ModelOperation {
   progress?: number;
   error?: string;
   startTime: Date;
+}
+
+interface JobResponse {
+  id: string;
+  job_type: string;
+  status: string;
+  progress_percent?: number | null;
+  message?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+  current_stage?: string | null;
+  result?: Record<string, unknown> | null;
+}
+
+interface JobListResponse {
+  jobs?: JobResponse[];
+  total?: number;
 }
 
 /**
@@ -171,6 +190,10 @@ const OLLAMA_SETTINGS = {
 class ComponentOllamaServer extends React.Component<OllamaServerComponentProps, OllamaServerComponentState> {
   private themeChangeListener: ((theme: string) => void) | null = null;
   private settingsUnsubscribe?: () => void;
+  private jobSyncTimer?: number;
+  private jobSyncInFlight = false;
+  private handledCompletionJobIds = new Set<string>();
+  private jobNameCache: Record<string, string> = {};
 
   constructor(props: OllamaServerComponentProps) {
     super(props);
@@ -213,6 +236,7 @@ class ComponentOllamaServer extends React.Component<OllamaServerComponentProps, 
     this.initializeSettingsSubscription();
     this.loadSettings();
     this.initializeThemeService();
+    this.startJobSync();
   }
 
   componentWillUnmount() {
@@ -222,6 +246,7 @@ class ComponentOllamaServer extends React.Component<OllamaServerComponentProps, 
     if (this.settingsUnsubscribe) {
       this.settingsUnsubscribe();
     }
+    this.stopJobSync();
   }
 
   /**
@@ -324,6 +349,259 @@ class ComponentOllamaServer extends React.Component<OllamaServerComponentProps, 
    */
   generateUniqueId = () => {
     return 'server_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+  };
+
+  private sortInstallationsForDisplay = (installations: ModelInstallation[]) => {
+    const priority = (status: ModelInstallation['status']) => {
+      if (status === 'downloading' || status === 'pending') return 0;
+      if (status === 'error') return 1;
+      return 2; // completed last
+    };
+
+    return [...installations].sort((a, b) => {
+      const aPriority = priority(a.status);
+      const bPriority = priority(b.status);
+      if (aPriority !== bPriority) {
+        return aPriority - bPriority;
+      }
+
+      const aTime = a.lastUpdated ? new Date(a.lastUpdated).getTime() : a.startTime.getTime();
+      const bTime = b.lastUpdated ? new Date(b.lastUpdated).getTime() : b.startTime.getTime();
+      return bTime - aTime;
+    });
+  };
+
+  startJobSync = () => {
+    this.stopJobSync();
+    // Kick off immediately, then poll
+    this.syncJobsWithInstallations();
+    this.jobSyncTimer = window.setInterval(() => this.syncJobsWithInstallations(), 8000);
+  };
+
+  stopJobSync = () => {
+    if (this.jobSyncTimer) {
+      window.clearInterval(this.jobSyncTimer);
+      this.jobSyncTimer = undefined;
+    }
+  };
+
+  private mapJobStatusToInstallation(status: string): ModelInstallation['status'] {
+    const normalized = (status || '').toLowerCase();
+    if (normalized === 'completed') return 'completed';
+    if (normalized === 'failed' || normalized === 'canceled') return 'error';
+    if (normalized === 'running') return 'downloading';
+    if (normalized === 'waiting' || normalized === 'queued') return 'pending';
+    return 'pending';
+  }
+
+  private persistJobName(jobId: string, modelName: string) {
+    if (!jobId || !modelName) return;
+    this.jobNameCache[jobId] = modelName;
+    try {
+      const existing = localStorage.getItem('ollamaJobNames');
+      const map = existing ? (JSON.parse(existing) as Record<string, string>) : {};
+      map[jobId] = modelName;
+      localStorage.setItem('ollamaJobNames', JSON.stringify(map));
+    } catch {
+      // ignore storage errors
+    }
+  }
+
+  private readPersistedJobName(jobId: string): string | undefined {
+    if (!jobId) return undefined;
+    if (this.jobNameCache[jobId]) return this.jobNameCache[jobId];
+    try {
+      const existing = localStorage.getItem('ollamaJobNames');
+      if (!existing) return undefined;
+      const map = JSON.parse(existing) as Record<string, string>;
+      const name = map[jobId];
+      if (name) {
+        this.jobNameCache[jobId] = name;
+      }
+      return name;
+    } catch {
+      return undefined;
+    }
+  }
+
+  private resolveJobModelName(job: JobResponse, fallback?: string): string {
+    const cached = job.id ? (this.jobNameCache[job.id] || this.readPersistedJobName(job.id)) : undefined;
+    if (cached) return cached;
+
+    const jobResultName =
+      (job.result?.model_name as string) ||
+      (job.result?.name as string) ||
+      (job as any)?.payload?.model_name ||
+      (job as any)?.payload?.name ||
+      (job as any)?.model_name ||
+      (job as any)?.name;
+
+    let name = jobResultName || fallback;
+
+    if (!name && job.message) {
+      const msg = String(job.message);
+      const looksLikeDigest = /^pulling\s+[0-9a-f]{6,}$/i.test(msg.trim());
+      name = looksLikeDigest ? undefined : msg;
+    }
+
+    // Try to parse model-like tokens (e.g., "hermes3:latest") from message
+    if (!name && job.message) {
+      const match = job.message.match(/([A-Za-z0-9_.-]+:[A-Za-z0-9_.-]+)/);
+      if (match && match[1]) {
+        name = match[1];
+      }
+    }
+    // Try from stage/current_stage if it looks like a model token
+    if (!name && job.current_stage) {
+      const stage = String(job.current_stage);
+      const match = stage.match(/([A-Za-z0-9_.-]+:[A-Za-z0-9_.-]+)/);
+      if (match && match[1]) {
+        name = match[1];
+      }
+    }
+
+    return name || 'Model download';
+  }
+
+  private attachJobToInstallation = (installationId: string, jobId: string) => {
+    if (installationId && jobId) {
+      const modelName = this.state.installations.find((i) => i.id === installationId)?.modelName;
+      if (modelName) {
+        this.persistJobName(jobId, modelName);
+      }
+    }
+    this.setState((prevState) => ({
+      installations: this.sortInstallationsForDisplay(
+        prevState.installations.map((installation) =>
+          installation.id === installationId ? { ...installation, jobId } : installation
+        )
+      ),
+    }));
+  };
+
+  private syncJobsWithInstallations = async () => {
+    if (!this.props.services?.api) {
+      return;
+    }
+    if (this.jobSyncInFlight) {
+      return;
+    }
+
+    this.jobSyncInFlight = true;
+    try {
+      const response = (await this.props.services.api.get('/api/v1/jobs?page=1&page_size=50')) as JobListResponse | JobResponse[];
+      const jobsArray: JobResponse[] = Array.isArray((response as JobListResponse)?.jobs)
+        ? ((response as JobListResponse).jobs as JobResponse[])
+        : (Array.isArray(response) ? (response as JobResponse[]) : []);
+
+      const installJobs = jobsArray.filter((job) => job.job_type === 'ollama.install');
+      this.mergeInstallationsFromJobs(installJobs);
+    } catch (err) {
+      console.error('Failed to sync install jobs', err);
+    } finally {
+      this.jobSyncInFlight = false;
+    }
+  };
+
+  private mergeInstallationsFromJobs = (jobs: JobResponse[]) => {
+    if (!Array.isArray(jobs)) {
+      return;
+    }
+
+    const terminalStatuses = new Set(['completed', 'failed', 'canceled']);
+    const seenJobIds = new Set<string>();
+    const terminalJobs: JobResponse[] = [];
+
+    this.setState((prevState) => {
+      let nextInstallations = [...prevState.installations];
+
+      jobs.forEach((job) => {
+        const modelName = this.resolveJobModelName(job);
+        const status = this.mapJobStatusToInstallation(job.status);
+        const progress = typeof job.progress_percent === 'number' ? job.progress_percent : 0;
+        const message = (job.current_stage as string) || job.message || (status === 'pending' ? 'Queued…' : undefined);
+
+        const matchIndex = nextInstallations.findIndex(
+          (installation) => installation.jobId === job.id || (!installation.jobId && installation.modelName === modelName)
+        );
+
+        const baseInstallation: ModelInstallation =
+          matchIndex >= 0
+            ? nextInstallations[matchIndex]
+            : {
+                id: job.id || `job_${Date.now()}`,
+                jobId: job.id,
+                modelName,
+                status,
+                progress,
+                error: status === 'error' ? (job.message as string) || undefined : undefined,
+                customMessage: message || undefined,
+                startTime: new Date(job.created_at || Date.now()),
+                lastUpdated: job.updated_at || job.created_at || undefined,
+              };
+
+        const updatedInstallation: ModelInstallation = {
+          ...baseInstallation,
+          jobId: job.id || baseInstallation.jobId,
+          modelName: baseInstallation.modelName || modelName,
+          status,
+          progress: typeof progress === 'number' ? progress : baseInstallation.progress,
+          customMessage: message || baseInstallation.customMessage,
+          error: status === 'error' ? (job.message as string) || baseInstallation.error : baseInstallation.error,
+          lastUpdated: job.updated_at || job.created_at || baseInstallation.lastUpdated,
+        };
+
+        if (job.id && updatedInstallation.modelName) {
+          this.persistJobName(job.id, updatedInstallation.modelName);
+        }
+
+        if (matchIndex >= 0) {
+          nextInstallations[matchIndex] = updatedInstallation;
+        } else {
+          nextInstallations.push(updatedInstallation);
+        }
+
+        if (job.id) {
+          seenJobIds.add(job.id);
+        }
+
+        if (terminalStatuses.has((job.status || '').toLowerCase()) && job.id) {
+          terminalJobs.push(job);
+        }
+      });
+
+      // Remove stale active installs whose job no longer appears
+      nextInstallations = nextInstallations.filter((installation) => {
+        if (installation.jobId && (installation.status === 'pending' || installation.status === 'downloading')) {
+          return seenJobIds.has(installation.jobId);
+        }
+        return true;
+      });
+
+      return { installations: this.sortInstallationsForDisplay(nextInstallations) };
+    }, () => {
+      terminalJobs.forEach((job) => this.handleTerminalJob(job));
+    });
+  };
+
+  private handleTerminalJob = (job: JobResponse) => {
+    const normalized = (job.status || '').toLowerCase();
+    if (!job.id || this.handledCompletionJobIds.has(job.id)) {
+      return;
+    }
+
+    this.handledCompletionJobIds.add(job.id);
+
+    if (normalized === 'completed' && this.state.activeServerId) {
+      this.loadModels(this.state.activeServerId);
+      setTimeout(() => {
+        this.setState((prevState) => ({
+          installations: this.sortInstallationsForDisplay(
+            prevState.installations.filter((installation) => installation.jobId !== job.id)
+          ),
+        }));
+      }, 1500);
+    }
   };
 
   private applyLoadedServers = (servers: ServerConfig[]) => {
@@ -1001,7 +1279,7 @@ class ComponentOllamaServer extends React.Component<OllamaServerComponentProps, 
     };
 
     this.setState(prevState => ({
-      installations: [...prevState.installations, installation]
+      installations: this.sortInstallationsForDisplay([...prevState.installations, installation])
     }));
 
     try {
@@ -1049,6 +1327,8 @@ class ComponentOllamaServer extends React.Component<OllamaServerComponentProps, 
       if (!taskId) {
         throw new Error('Failed to start install task');
       }
+      this.persistJobName(taskId, installation.modelName);
+      this.attachJobToInstallation(installation.id, taskId);
 
       // Prefer SSE if available; fallback to polling status
       if (this.props.services.api.getSse) {
@@ -1189,18 +1469,30 @@ class ComponentOllamaServer extends React.Component<OllamaServerComponentProps, 
     }
   };
 
-  updateInstallationStatus = (id: string, status: ModelInstallation['status'], progress?: number, error?: string, customMessage?: string) => {
+  updateInstallationStatus = (
+    id: string,
+    status: ModelInstallation['status'],
+    progress?: number,
+    error?: string,
+    customMessage?: string,
+    jobId?: string,
+    lastUpdated?: string,
+  ) => {
     this.setState(prevState => ({
-      installations: prevState.installations.map(installation =>
-        installation.id === id
-          ? {
-              ...installation,
-              status,
-              ...(progress !== undefined && { progress }),
-              ...(error && { error }),
-              ...(customMessage && { customMessage })
-            }
-          : installation
+      installations: this.sortInstallationsForDisplay(
+        prevState.installations.map(installation =>
+          installation.id === id
+            ? {
+                ...installation,
+                status,
+                ...(progress !== undefined && { progress }),
+                ...(error && { error }),
+                ...(customMessage && { customMessage }),
+                ...(jobId && { jobId }),
+                ...(lastUpdated && { lastUpdated }),
+              }
+            : installation
+        )
       )
     }));
   };
@@ -1217,7 +1509,9 @@ class ComponentOllamaServer extends React.Component<OllamaServerComponentProps, 
 
   removeInstallation = (id: string) => {
     this.setState(prevState => ({
-      installations: prevState.installations.filter(installation => installation.id !== id)
+      installations: this.sortInstallationsForDisplay(
+        prevState.installations.filter(installation => installation.id !== id)
+      )
     }));
   };
 
@@ -1582,8 +1876,13 @@ class ComponentOllamaServer extends React.Component<OllamaServerComponentProps, 
   renderModelsTable = () => {
     const { selectedModelId, expandedModelId, installations } = this.state;
     const { models: displayModels, totalItems, totalPages, currentPage, itemsPerPage } = this.getPaginatedModels();
+    const activeInstallations = installations.filter((installation) =>
+      installation.status === 'pending' || installation.status === 'downloading'
+    );
+    const activeNames = new Set(activeInstallations.map((inst) => inst.modelName));
+    const filteredModels = displayModels.filter((model) => !activeNames.has(model.name));
 
-    if (totalItems === 0 && installations.length === 0) {
+    if (filteredModels.length === 0 && activeInstallations.length === 0) {
       return (
         <div className="models-table-empty">
           <p>No models found on this server</p>
@@ -1636,7 +1935,7 @@ class ComponentOllamaServer extends React.Component<OllamaServerComponentProps, 
           </thead>
           <tbody>
             {/* Installation Progress Rows */}
-            {installations.map((installation) => (
+            {activeInstallations.map((installation) => (
               <tr key={`install-${installation.id}`} className="table-row-installation">
                 <td className="model-name-cell">
                   <div className="model-name-content">
@@ -1695,7 +1994,7 @@ class ComponentOllamaServer extends React.Component<OllamaServerComponentProps, 
             ))}
 
             {/* Regular Model Rows */}
-            {displayModels.map((model) => {
+            {filteredModels.map((model) => {
               const modelId = `${model.name}-${model.tag}`;
               const isExpanded = expandedModelId === modelId;
               

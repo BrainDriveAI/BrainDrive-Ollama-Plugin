@@ -102,7 +102,7 @@ class BrainDriveOllamaLifecycleManager(BaseLifecycleManager):
         self.plugin_data = {
             "name": "BrainDrive Ollama",
             "description": "Dedicated Ollama integration plugin for BrainDrive",
-            "version": "1.0.0",
+            "version": "1.0.1",
             "type": "frontend",
             "icon": "SmartToy",
             "category": "LLM Servers",
